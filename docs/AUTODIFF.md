@@ -131,7 +131,7 @@ Este repo implementa **forward** con `N` tangentes.
 
 ## 5. Este repositorio: `Dual<const N: usize>`
 
-El motor vive en `src/autodiff.rs`. La estructura es un número dual con `N`
+El motor vive en `src/forward_mode.rs`. La estructura es un número dual con `N`
 tangentes simultáneos (un vector fila del Jacobiano):
 
 ```rust
@@ -157,7 +157,7 @@ a diferencia del backward mode que se usa en las redes reales.)
 
 ### Operadores
 
-Implementados en `src/autodiff.rs:114` en adelante como `Add`, `Sub`, `Mul`,
+Implementados en `src/forward_mode.rs:114` en adelante como `Add`, `Sub`, `Mul`,
 `Div`, `Neg` en tres variantes (`Dual op Dual`, `Dual op f64`, `f64 op Dual`),
 más los `*Assign`. Las reglas son las habituales; nótese cómo la multiplicación
 encadena ambos tangentes (regla del producto):
@@ -169,7 +169,7 @@ encadena ambos tangentes (regla del producto):
 
 ### Funciones elementales y sus derivadas
 
-Definidas en `src/autodiff.rs:30`–`111`. La ayuda `unary(value, derivative)`
+Definidas en `src/forward_mode.rs:30`–`111`. La ayuda `unary(value, derivative)`
 aplica `grad[i] *= derivative`:
 
 | Método | `value` | derivada usada |
