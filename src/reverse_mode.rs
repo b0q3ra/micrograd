@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -23,7 +24,11 @@ pub enum Op {
     Exp(Value),
     Ln(Value),
     Tanh(Value),
-    // TODO: Sin, Cos, Powf, Sigmoid, Relu, ...
+    Sin(Value),
+    Cos(Value),
+    Powf(Value, f64),
+    Sigmoid(Value),
+    Relu(Value),
 }
 
 impl Value {
@@ -68,41 +73,75 @@ impl Value {
         )
     }
 
-    pub fn sub(&self, _other: &Value) -> Value {
-        todo!()
+    pub fn sub(&self, other: &Value) -> Value {
+        Value::new(
+            self.data() - other.data(),
+            Op::Sub(self.clone(), other.clone()),
+        )
     }
 
-    pub fn mul(&self, _other: &Value) -> Value {
-        todo!()
+    pub fn mul(&self, other: &Value) -> Value {
+        Value::new(
+            self.data() * other.data(),
+            Op::Mul(self.clone(), other.clone()),
+        )
     }
 
-    pub fn div(&self, _other: &Value) -> Value {
-        todo!()
+    pub fn div(&self, other: &Value) -> Value {
+        Value::new(
+            self.data() / other.data(),
+            Op::Div(self.clone(), other.clone()),
+        )
     }
 
     pub fn neg(&self) -> Value {
-        todo!()
+        Value::new(-self.data(), Op::Neg(self.clone()))
     }
 
     pub fn exp(&self) -> Value {
-        todo!()
+        Value::new(self.data().exp(), Op::Exp(self.clone()))
     }
 
     pub fn ln(&self) -> Value {
-        todo!()
+        Value::new(self.data().ln(), Op::Ln(self.clone()))
     }
 
     pub fn tanh(&self) -> Value {
-        todo!()
+        Value::new(self.data().tanh(), Op::Tanh(self.clone()))
+    }
+
+    pub fn sin(&self) -> Value {
+        Value::new(self.data().sin(), Op::Sin(self.clone()))
+    }
+
+    pub fn cos(&self) -> Value {
+        Value::new(self.data().cos(), Op::Cos(self.clone()))
+    }
+
+    pub fn powf(&self, p: f64) -> Value {
+        Value::new(self.data().powf(p), Op::Powf(self.clone(), p))
+    }
+
+    pub fn sigmoid(&self) -> Value {
+        let s = 1.0 / (1.0 + (-self.data()).exp());
+        Value::new(s, Op::Sigmoid(self.clone()))
+    }
+
+    pub fn relu(&self) -> Value {
+        let value = self.data().max(0.0);
+        Value::new(value, Op::Relu(self.clone()))
     }
 
     // --- reverse ---
     pub fn backward(&self) {
-        // 1. let orden = topo_sort(self);
-        // 2. for n in &orden { n.zero_grad() }
-        // 3. self.set_grad(1.0);
-        // 4. for n in orden.iter().rev() { n.apply_vjp() }
-        todo!()
+        let orden = topo_sort(self);
+        for n in &orden {
+            n.zero_grad();
+        }
+        self.set_grad(1.0);
+        for n in orden.iter().rev() {
+            n.apply_vjp();
+        }
     }
 
     fn apply_vjp(&self) {
@@ -118,12 +157,48 @@ impl Value {
                 a.add_grad(g * b.data());
                 b.add_grad(g * a.data());
             }
-            Op::Sub(_, _)
-            | Op::Div(_, _)
-            | Op::Neg(_)
-            | Op::Exp(_)
-            | Op::Ln(_)
-            | Op::Tanh(_) => todo!(),
+            Op::Sub(a, b) => {
+                let g = self.grad();
+                a.add_grad(g);
+                b.add_grad(-g);
+            }
+            Op::Div(a, b) => {
+                let g = self.grad();
+                let bd = b.data();
+                a.add_grad(g / bd);
+                b.add_grad(-g * a.data() / (bd * bd));
+            }
+            Op::Neg(a) => {
+                a.add_grad(-self.grad());
+            }
+            Op::Exp(a) => {
+                a.add_grad(self.grad() * self.data());
+            }
+            Op::Ln(a) => {
+                a.add_grad(self.grad() / a.data());
+            }
+            Op::Tanh(a) => {
+                let t = self.data();
+                a.add_grad(self.grad() * (1.0 - t * t));
+            }
+            Op::Sin(a) => {
+                a.add_grad(self.grad() * a.data().cos());
+            }
+            Op::Cos(a) => {
+                a.add_grad(self.grad() * -a.data().sin());
+            }
+            Op::Powf(a, p) => {
+                a.add_grad(self.grad() * p * a.data().powf(p - 1.0));
+            }
+            Op::Sigmoid(a) => {
+                let s = self.data();
+                a.add_grad(self.grad() * s * (1.0 - s));
+            }
+            Op::Relu(a) => {
+                if a.data() > 0.0 {
+                    a.add_grad(self.grad());
+                }
+            }
         }
     }
 
@@ -131,16 +206,39 @@ impl Value {
         match self.op() {
             Op::Leaf => vec![],
             Op::Add(a, b) | Op::Sub(a, b) | Op::Mul(a, b) | Op::Div(a, b) => vec![a, b],
-            Op::Neg(a) | Op::Exp(a) | Op::Ln(a) | Op::Tanh(a) => vec![a],
+            Op::Neg(a)
+            | Op::Exp(a)
+            | Op::Ln(a)
+            | Op::Tanh(a)
+            | Op::Sin(a)
+            | Op::Cos(a)
+            | Op::Sigmoid(a)
+            | Op::Relu(a) => vec![a],
+            Op::Powf(a, _) => vec![a],
         }
     }
 }
 
-fn topo_sort(_root: &Value) -> Vec<Value> {
-    // DFS postorden con un HashSet<*const ValueInner> para no repetir nodos.
-    // Postorden => hijos antes que padres; la raíz queda al final.
-    // Pista: Rc::as_ptr(&value.0) te da un puntero estable para la identidad.
-    todo!()
+fn topo_sort(root: &Value) -> Vec<Value> {
+    fn visit(
+        value: &Value,
+        visited: &mut HashSet<*const RefCell<ValueInner>>,
+        order: &mut Vec<Value>,
+    ) {
+        let ptr = Rc::as_ptr(&value.0);
+        if !visited.insert(ptr) {
+            return;
+        }
+        for child in value.operands() {
+            visit(&child, visited, order);
+        }
+        order.push(value.clone());
+    }
+
+    let mut visited = HashSet::new();
+    let mut order = Vec::new();
+    visit(root, &mut visited, &mut order);
+    order
 }
 
 #[cfg(test)]
@@ -149,11 +247,18 @@ mod tests {
     use crate::Dual;
 
     #[test]
-    #[ignore = "TODO: implementar el modo reverse antes de activar este test"]
     fn multivariate_chain_matches_forward() {
         // z = (x*y + sin(x)).exp()  con x=0.5, y=1.5
-        // Comparar x.grad() / y.grad() con Dual::<2> (aprox. 8.128 y 1.709).
-        let _ = Dual::<2>::var(0.5, 0);
-        todo!()
+        let x = Value::leaf(0.5);
+        let y = Value::leaf(1.5);
+        let z = x.mul(&y).add(&x.sin()).exp();
+        z.backward();
+
+        let dx = Dual::<2>::var(0.5, 0);
+        let dy = Dual::<2>::var(1.5, 1);
+        let dz = (dx * dy + dx.sin()).exp();
+
+        assert!((x.grad() - dz.grad[0]).abs() < 1e-9);
+        assert!((y.grad() - dz.grad[1]).abs() < 1e-9);
     }
 }
